@@ -2,13 +2,11 @@
 title: "Corhort_analysis_in_R"
 author: "Amanda Wu"
 date: "2023-05-25"
-output:
-  html_document:
-    df_print: paged
+output: github_document
 ---
 
 # Load libraries
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # install.packages("dplyr") # to install this package for joining data frames
 library(dplyr)
 
@@ -29,7 +27,7 @@ library(gridExtra)
 ```
 
 # Read data files and examine the data structure 
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # define the directory 
 pathname<-"C:/Users/Amanda/Desktop/jobs/job_prep_materials/Applying/Invitae/Cohort_Analysis/Cohort_Analysis/" # this is the directory where I stored the csv files (please modify according to your directory)
 
@@ -51,7 +49,7 @@ colnames(order.df)<-c("order_id", "order_number", "user_id", "order_date")
 ```
 
 # Join the two data frames and do some data wrangling 
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # join the two data frame based on column user_id
 join.df<-full_join(order.df,customer.df,  by = "user_id")
 head(join.df) # notice that some rows have missing data, because the customer.df is a smaller subset within order.df
@@ -89,7 +87,7 @@ join.complete.df$weeks_after_signup<-as.numeric(floor(join.complete.df$days_afte
 ```
 
 # Do cohort analysis for total users (including repetitive buyers)
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # first group the customer by the week they signed up
 join.complete.df$CohortGroup<-cut(join.complete.df$sign_up_date, breaks="7 days", labels=FALSE)
 # how many bins should there be?
@@ -132,7 +130,7 @@ head(cohort_retention_df.perc)
 ```
 
 # Do cohort analysis for first time orderers
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # retain only the most early record for each user_id from join.complete.df
 join.complete.1st_time.df<-join.complete.df%>% group_by(user_id) %>%  filter(order_date == min(order_date)) # the filter function here make sure that each user_id only appeared once, and we select the row according to the earliesr order date of the uer_id
 
@@ -166,7 +164,7 @@ head(FistTimeUsers_retention_df.perc)
 ```
 
 # Bind the total user cohort table and first time user cohort table
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # mask the first three columns of FistTimeUsers_retention_df.perc
 FistTimeUsers_retention_df.perc.NA<-FistTimeUsers_retention_df.perc
 FistTimeUsers_retention_df.perc.NA[,1:3]<-NA
@@ -187,7 +185,7 @@ write.csv(combined.matrix, paste0(pathname, "cohort_analysis_output.csv"), row.n
 
 # Data visualization
 # Total user cohort heatmap
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # Below, I'm trying to make a heat map of the retention rate for total buyers 
 # delete the characters and convert the data frame to numeric
 cohort_retention.perc2<-sapply(data.frame(gsub("% orderers", "", cohort_retention.perc)),  function(x) as.numeric(x))
@@ -222,7 +220,7 @@ cohort_retention.perc.ggplot
 ```
 
 ## First Time user cohort heatmap
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # Below, I'm trying to make a heat map of the retention rate for first time buyers 
 # delete the characters and convert the data frame to numeric
 FistTimeUsers_retention.perc2<-sapply(data.frame(gsub("% 1st time", "", FistTimeUsers_retention.perc)),  function(x) as.numeric(x))
@@ -257,7 +255,7 @@ FistTimeUsers_retention.perc.ggplot
 ```
 
 ## combine the two heatmaps
-```{r}
+```{r, include=TRUE, warning=FALSE}
 grid.arrange(cohort_retention.perc.ggplot, FistTimeUsers_retention.perc.ggplot)
 
 # save heatmaps
@@ -268,7 +266,7 @@ dev.off()
 
 ## Total user and first time user cohort line chart
 We will use facet_wrap function to look at each cohort group
-```{r}
+```{r, include=TRUE, warning=FALSE}
 # add additional column as week no.
 weekno.df<-data.frame(Order.date.since.signup = unique(cohort_retention_df.perc.melt$Order.date.since.signup),
                       weekNo = 1:length(unique(cohort_retention_df.perc.melt$Order.date.since.signup)))
