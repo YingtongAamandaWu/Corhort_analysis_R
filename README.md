@@ -1,7 +1,5 @@
 **Corhort analysis in R**
 
-This is a take-home assignment from Invitae. Completed on May 26th, 2023.
-
 The cohort analysis aims to understand customers' ordering behavior based on their signup date. I grouped the customers into week long (7 days) cohorts and then calculated how many distinct customers ordered within X days from their signup date, where X is a multiple of 7.
 
 **Software requirements:**
