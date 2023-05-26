@@ -1,0 +1,309 @@
+---
+title: "Corhort_analysis_in_R"
+author: "Amanda Wu"
+date: "2023-05-25"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Load libraries
+```{r}
+# install.packages("dplyr") # to install this package for joining data frames
+library(dplyr)
+
+# install.packages('ascii') # to install this package for joining matrix
+library(ascii)
+
+# install.packages("tidyr") # to install this package for data wrangling
+library(tidyr)
+
+# install.packages("tidyverse"), lubricate package is within tidyverse; lubricate is used for converting time zones
+library(lubridate)
+
+# The easiest way to get ggplot2 is to install the whole tidyverse: install.packages("tidyverse")
+library(ggplot2)
+
+# install.packages("gridExtra"); this package helps combine multiple ggplot together 
+library(gridExtra)
+```
+
+# Read data files and examine the data structure 
+```{r}
+# define the directory 
+pathname<-"C:/Users/Amanda/Desktop/jobs/job_prep_materials/Applying/Invitae/Cohort_Analysis/Cohort_Analysis/" # this is the directory where I stored the csv files (please modify according to your directory)
+
+# read csv files 
+customer.df<-read.csv(paste0(pathname, "customers.csv")) # customer 
+order.df<-read.csv(paste0(pathname, "orders.csv")) # order 
+
+# Look at the basics of customer.df
+head(customer.df)
+dim(customer.df) # 25716 rows of data 
+# change column names 
+colnames(customer.df)<-c("user_id", "sign_up_date")
+
+# Look at the basics of order.df
+head(order.df)
+dim(order.df) # 27575 rows of data 
+# change column names 
+colnames(order.df)<-c("order_id", "order_number", "user_id", "order_date")
+```
+
+# Join the two data frames and do some data wrangling 
+```{r}
+# join the two data frame based on column user_id
+join.df<-full_join(order.df,customer.df,  by = "user_id")
+head(join.df) # notice that some rows have missing data, because the customer.df is a smaller subset within order.df
+
+# delete rows where either sign_up_date and order_date is empty
+delete.index<-unique(c(which(is.na(join.df$sign_up_date)),  which(is.na(join.df$order_date))))
+join.complete.df<-join.df[-delete.index,]
+
+# check the data frame
+join.complete.df[1:20,]
+tail(join.complete.df)
+nrow(join.complete.df) # 17015 rows left
+
+# check if all order date is later than sign up date
+which(join.complete.df$order_date < join.complete.df$sign_up_date ) # yes, indeed all order date is later than sign up date
+
+# check if some customers have multiple times of order
+customer.ordertimes<-join.complete.df %>% group_by(user_id) %>% summarise(order_times = n())
+hist(customer.ordertimes$order_times, breaks = 50) # yes, indeed some customers ordered more than 1 time 
+
+# Convert UTC time to PDT 
+for(columname in  c("order_date", "sign_up_date")){
+join.complete.df[,columname]<-as.POSIXct(join.complete.df[,columname], tz="UTC") # define the current format as UTC
+print(join.complete.df[,columname][1:6]) # print original time in UTC
+join.complete.df[, columname]<-with_tz(join.complete.df[,columname], "America/Los_Angeles") # convert from UTC to PDT(Pacific Daylight Time) time zone  
+print(join.complete.df[,columname][1:6]) # print to visually confirm that the conversion is correct
+}
+
+# calculate the days between sign up date and order date
+join.complete.df$days_after_signup<-as.numeric(floor((join.complete.df$order_date-join.complete.df$sign_up_date)/1440 ))
+head(join.complete.df)
+
+# calculate the week number between sign up date and order date
+join.complete.df$weeks_after_signup<-as.numeric(floor(join.complete.df$days_after_signup/7)+1)
+```
+
+# Do cohort analysis for total users (including repetitive buyers)
+```{r}
+# first group the customer by the week they signed up
+join.complete.df$CohortGroup<-cut(join.complete.df$sign_up_date, breaks="7 days", labels=FALSE)
+# how many bins should there be?
+as.numeric((max(join.complete.df$sign_up_date)-min(join.complete.df$sign_up_date))/7) # there should be 27 bins
+# check if the time bins are correct 
+range(join.complete.df$sign_up_bin)
+join.complete.df[1:20,]
+tail(join.complete.df)
+
+# create reference data frame of total users for each cohort group
+base_cohort_df = join.complete.df %>% group_by(CohortGroup) %>% summarise(TotalUsers = n_distinct(user_id), cohortname= paste(substr(min(sign_up_date),1,10),"to",substr(max(sign_up_date),1,10)))
+head(base_cohort_df)
+
+# create purchase activity data frame
+activity_cohort_df = join.complete.df %>% group_by(CohortGroup, weeks_after_signup) %>% summarise( BuyingUsers = n_distinct(user_id))
+head(activity_cohort_df)
+
+# join activity_cohort_df and base_cohort_df
+user_cohort_df = inner_join(activity_cohort_df, base_cohort_df, 
+                  by = 'CohortGroup')
+
+# Cohort table by the counts of users
+cohort_retention_df = user_cohort_df %>% select(CohortGroup,  cohortname, TotalUsers, weeks_after_signup, BuyingUsers) %>%spread(weeks_after_signup, BuyingUsers)
+head(cohort_retention_df)
+# change the column names 
+for (colno in colnames(cohort_retention_df)[-1:-3]){
+  colnames(cohort_retention_df)[as.numeric(colno)+3]<-paste0("Days",as.numeric(colno)*7-7,"to",as.numeric(colno)*7-1)
+}
+head(cohort_retention_df)
+
+# the percentage version of the dataframe 
+cohort_retention.perc<-sapply(cohort_retention_df[,-1:-3], function(x) paste0(round(x/cohort_retention_df$TotalUsers*100,2),"% orderers"))
+cohort_retention.perc<-gsub( "NA% orderers", "",cohort_retention.perc)
+
+# bind the count user matrix and percentage user matrix together
+cohort_retention_df.perc<-paste.matrix(cohort_retention.perc, "(", cohort_retention_df[,-1:-3],")")
+colnames(cohort_retention_df.perc)<-colnames(cohort_retention.perc)
+cohort_retention_df.perc<-cbind(cohort_retention_df[,1:3],cohort_retention_df.perc)
+head(cohort_retention_df.perc)
+```
+
+# Do cohort analysis for first time orderers
+```{r}
+# retain only the most early record for each user_id from join.complete.df
+join.complete.1st_time.df<-join.complete.df%>% group_by(user_id) %>%  filter(order_date == min(order_date)) # the filter function here make sure that each user_id only appeared once, and we select the row according to the earliesr order date of the uer_id
+
+# create purchase activity data frame
+activity_1storder_cohort_df = join.complete.1st_time.df %>% group_by(CohortGroup, weeks_after_signup) %>% summarise( FirstTimeUsers = n_distinct(user_id))
+head(activity_1storder_cohort_df)
+
+# join activity_1storder_cohort_df and base_cohort_df
+FistTimeUsers_cohort_df = inner_join(activity_1storder_cohort_df, base_cohort_df, 
+                  by = 'CohortGroup')
+
+# Cohort table by the counts of users
+FistTimeUsers_retention_df = FistTimeUsers_cohort_df %>% select(CohortGroup,  cohortname, TotalUsers, weeks_after_signup, FirstTimeUsers) %>%spread(weeks_after_signup, FirstTimeUsers)
+head(FistTimeUsers_retention_df)
+# change the column names 
+for (colno in colnames(FistTimeUsers_retention_df)[-1:-3]){
+  colnames(FistTimeUsers_retention_df)[as.numeric(colno)+3]<-paste0("Days",as.numeric(colno)*7-7,"to",as.numeric(colno)*7-1)
+}
+
+head(FistTimeUsers_retention_df)
+
+# the percentage version of the 1st time user dataframe 
+FistTimeUsers_retention.perc<-sapply(FistTimeUsers_retention_df[,-1:-3], function(x) paste0(round(x/FistTimeUsers_retention_df$TotalUsers*100,2),"% 1st time"))
+FistTimeUsers_retention.perc<-gsub( "NA% 1st time", "",FistTimeUsers_retention.perc)
+
+# bind the first time user count matrix and percentage  matrix together
+FistTimeUsers_retention_df.perc<-paste.matrix(FistTimeUsers_retention.perc, "(", FistTimeUsers_retention_df[,-1:-3],")")
+colnames(FistTimeUsers_retention_df.perc)<-colnames(FistTimeUsers_retention.perc)
+FistTimeUsers_retention_df.perc<-cbind(FistTimeUsers_retention_df[,1:3],FistTimeUsers_retention_df.perc)
+head(FistTimeUsers_retention_df.perc)
+```
+
+# Bind the total user cohort table and first time user cohort table
+```{r}
+# mask the first three columns of FistTimeUsers_retention_df.perc
+FistTimeUsers_retention_df.perc.NA<-FistTimeUsers_retention_df.perc
+FistTimeUsers_retention_df.perc.NA[,1:3]<-NA
+
+# Make a for loop to alternatively input the rows from the total user cohort table (cohort_retention_df.perc) and the first time user cohort table (FistTimeUsers_retention_df.perc)
+combined.matrix<-data.frame() # empty data frame for storing the data
+
+for (i in 1:nrow(cohort_retention_df.perc)){
+  rbined.matrix<-rbind(cohort_retention_df.perc[i,], FistTimeUsers_retention_df.perc.NA[i,])
+  combined.matrix<-rbind(data.frame(combined.matrix),data.frame(rbined.matrix))
+}
+
+head(combined.matrix)
+
+# save the data frame as csv
+write.csv(combined.matrix, paste0(pathname, "cohort_analysis_output.csv"), row.names = FALSE)
+```
+
+# Data visualization
+# Total user cohort heatmap
+```{r}
+# Below, I'm trying to make a heat map of the retention rate for total buyers 
+# delete the characters and convert the data frame to numeric
+cohort_retention.perc2<-sapply(data.frame(gsub("% orderers", "", cohort_retention.perc)),  function(x) as.numeric(x))
+cohort_retention_df.perc2<-cbind(cohort_retention_df.perc[,1:3],cohort_retention.perc2)
+head(cohort_retention_df.perc2)
+
+# melt the dataframes for plotting
+cohort_retention_df.perc.melt = gather(cohort_retention_df.perc2, "Order.date.since.signup", "BuyingUsersPerc", 4:ncol(cohort_retention_df.perc2))
+cohort_retention_df.perc.melt<-cohort_retention_df.perc.melt[-which(is.na(cohort_retention_df.perc.melt)),]
+cohort_retention_df.perc.melt[1:10,] # remove NAs
+# reorder the Order.date.since.signup
+cohort_retention_df.perc.melt$Order.date.since.signup<-factor(cohort_retention_df.perc.melt$Order.date.since.signup, levels = unique(cohort_retention_df.perc.melt$Order.date.since.signup))
+
+# ggplot
+cohort_retention.perc.ggplot<-ggplot(cohort_retention_df.perc.melt) +
+  geom_raster(aes(x = Order.date.since.signup,
+                  y = reorder(cohortname , desc(cohortname)),
+                  fill = BuyingUsersPerc), show.legend=TRUE) +
+    scale_fill_viridis_c(name = "Purchase rate (%)") + 
+  geom_text(aes(x = Order.date.since.signup,
+                y = reorder(cohortname, desc(cohortname)),
+                label = BuyingUsersPerc), col = "white",size = 3) +
+#  scale_y_discrete(labels = unique(cohort_retention_df.perc.melt$cohortname))+
+  labs(
+    title = "(A) Cohort analysis for weekly orders",
+    x = "Days between purchase date and sign-up date",
+    y = "Cohort Group"
+  )+
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))
+
+cohort_retention.perc.ggplot
+```
+
+## First Time user cohort heatmap
+```{r}
+# Below, I'm trying to make a heat map of the retention rate for first time buyers 
+# delete the characters and convert the data frame to numeric
+FistTimeUsers_retention.perc2<-sapply(data.frame(gsub("% 1st time", "", FistTimeUsers_retention.perc)),  function(x) as.numeric(x))
+FistTimeUsers_retention_df.perc2<-cbind(FistTimeUsers_retention_df.perc[,1:3],FistTimeUsers_retention.perc2)
+head(FistTimeUsers_retention_df.perc2)
+
+# melt the dataframes for plotting
+FistTimeUsers_retention_df.perc.melt = gather(FistTimeUsers_retention_df.perc2, "Order.date.since.signup", "BuyingUsersPerc", 4:ncol(FistTimeUsers_retention_df.perc2))
+FistTimeUsers_retention_df.perc.melt<-FistTimeUsers_retention_df.perc.melt[-which(is.na(FistTimeUsers_retention_df.perc.melt)),]# remove NAs
+FistTimeUsers_retention_df.perc.melt[1:10,]# Check out the first 10 rows
+# reorder the Order.date.since.signup
+FistTimeUsers_retention_df.perc.melt$Order.date.since.signup<-factor(FistTimeUsers_retention_df.perc.melt$Order.date.since.signup, levels = unique(FistTimeUsers_retention_df.perc.melt$Order.date.since.signup))
+
+# ggplot
+FistTimeUsers_retention.perc.ggplot<-ggplot(FistTimeUsers_retention_df.perc.melt) +
+  geom_raster(aes(x = Order.date.since.signup,
+                  y = reorder(cohortname , desc(cohortname)),
+                  fill = BuyingUsersPerc)) +
+    scale_fill_viridis_c(name = "Purchase rate (%)") + 
+  geom_text(aes(x = Order.date.since.signup,
+                y = reorder(cohortname, desc(cohortname)),
+                label = BuyingUsersPerc), col = "white", size = 3) +
+#  scale_y_discrete(labels = unique(FistTimeUsers_retention_df.perc.melt$cohortname))+
+  labs(
+    title = "(B) Cohort analysis for first-time orders",
+    x = "Days between the first purchase and sign-up date",
+    y = "Cohort Group"
+  )+
+  theme(axis.text.x=element_text(angle = -90, hjust = 0))
+
+FistTimeUsers_retention.perc.ggplot
+```
+
+## combine the two heatmaps
+```{r}
+grid.arrange(cohort_retention.perc.ggplot, FistTimeUsers_retention.perc.ggplot)
+
+# save heatmaps
+tiff(paste0(pathname, "retention.heatmaps.tiff"), height = 15, width = 12, unit="in", res = 600)
+grid.arrange(cohort_retention.perc.ggplot, FistTimeUsers_retention.perc.ggplot)
+dev.off()
+```
+
+## Total user and first time user cohort line chart
+We will use facet_wrap function to look at each cohort group
+```{r}
+# add additional column as week no.
+weekno.df<-data.frame(Order.date.since.signup = unique(cohort_retention_df.perc.melt$Order.date.since.signup),
+                      weekNo = 1:length(unique(cohort_retention_df.perc.melt$Order.date.since.signup)))
+
+cohort_retention_df.perc.melt2<-left_join(cohort_retention_df.perc.melt, weekno.df)
+head(cohort_retention_df.perc.melt2)
+
+FistTimeUsers_retention_df.perc.melt2<-left_join(FistTimeUsers_retention_df.perc.melt, weekno.df)
+head(FistTimeUsers_retention_df.perc.melt2)
+
+# plotting line chart
+cohort_retention.perc.linechart<-ggplot(cohort_retention_df.perc.melt2) +
+  geom_line(aes(x = weekNo,y = BuyingUsersPerc, 
+                col = cohortname)) +
+  labs(
+    title = "(A) Cohort analysis for weekly orders",
+    x = "Number of weeks between purchase date and sign-up date",
+    y = "Purchase rate (%)",
+    col = "Cohort Group (user sign-up date)"
+  )+
+  theme_bw()
+
+cohort_retention.perc.linechart # as you can see, it is hard to see each cohort one by one
+
+# plotting line chart using facetwrap to show ,the cohort one by one
+cohort_retention.perc.linechart.facet<-ggplot() +
+  geom_line(aes(x = weekNo,y = BuyingUsersPerc), data = cohort_retention_df.perc.melt2)+ # use solid line for total users
+  geom_line(aes(x = weekNo,y = BuyingUsersPerc), data = FistTimeUsers_retention_df.perc.melt2, linetype = "dotted") + # use dotted line for first time orders
+  facet_wrap(~cohortname, ncol = 5)+
+  labs(
+    x = "Number of weeks between purchase date and sign-up date",
+    y = "Purchase rate (%)",
+    col = "Cohort Group (user sign-up date)"
+  )+
+  theme_bw()
+
+cohort_retention.perc.linechart.facet
+```
