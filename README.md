@@ -13,3 +13,4 @@ orders.csv: this file documents "id" for order id, "order_number" for the purcha
 
 **Output files:**
 cohort_analysis_output.csv: this file documents "CohortGroup" for the assession number of the cohort, "cohortname" for the range of sign-up date of customers, "TotalUsers" for the total number of unique customers within that corhort. The rest of the columns document the percentage of customers within the cohort and the number of customers that put down orders for every week (days 0-6, days 7-13, etc). 
+retention.heatmaps.pdf: this is a plot of two heatmaps, showing the change in customers' purchase rates in weeks after signing up. A description of the figure is also shown on the figure. 
